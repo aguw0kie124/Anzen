@@ -12,6 +12,9 @@ from rich.table import Table
 from . import __version__
 from .store import SEVERITY_ORDER, Store, anzen_home, default_db
 
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 4318
+
 _DB_OPTION = typer.Option(None, "--db", help="SQLite database path (default: ~/.anzen/anzen.db).")
 
 
@@ -70,8 +73,8 @@ def _main(
 
 @app.command()
 def serve(
-    port: int = typer.Option(4318, help="OTLP/HTTP port to listen on."),
-    host: str = typer.Option("127.0.0.1", help="Host to bind."),
+    port: int = typer.Option(DEFAULT_PORT, help="OTLP/HTTP port to listen on."),
+    host: str = typer.Option(DEFAULT_HOST, help="Host to bind."),
     db: str = _DB_OPTION,
 ) -> None:
     """Start the collector: receive and record agent telemetry (OpenInference over OTLP)."""
@@ -216,22 +219,6 @@ def report(
     store.close()
 
 
-def _pidfile() -> Path:
-    return anzen_home() / "collector.pid"
-
-
-def _read_pidfile() -> dict | None:
-    import json as jsonlib
-
-    path = _pidfile()
-    if not path.exists():
-        return None
-    try:
-        return jsonlib.loads(path.read_text())
-    except (ValueError, OSError):
-        return None
-
-
 def _collector_healthy(host: str, port: int, timeout: float = 1.0) -> bool:
     import urllib.request
 
@@ -243,73 +230,6 @@ def _collector_healthy(host: str, port: int, timeout: float = 1.0) -> bool:
 
 
 @app.command()
-def up(
-    port: int = typer.Option(4318, help="OTLP/HTTP port to listen on."),
-    host: str = typer.Option("127.0.0.1", help="Host to bind."),
-    db: str = _DB_OPTION,
-) -> None:
-    """Start the collector in the background (logs to ~/.anzen/collector.log)."""
-    import json as jsonlib
-    import subprocess
-    import sys as syslib
-    import time as timelib
-
-    db = _db(db)
-    info = _read_pidfile()
-    if info and _collector_healthy(info.get("host", host), info.get("port", port)):
-        console.print(f"[green]Already running[/green] (pid {info['pid']}) at "
-                      f"http://{info['host']}:{info['port']}")
-        return
-
-    log_path = anzen_home() / "collector.log"
-    with open(log_path, "ab") as log:
-        proc = subprocess.Popen(
-            [syslib.executable, "-m", "anzen", "serve",
-             "--host", host, "--port", str(port), "--db", db],
-            stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-            start_new_session=True,  # survives this terminal closing
-        )
-    _pidfile().write_text(jsonlib.dumps({"pid": proc.pid, "host": host, "port": port, "db": db}))
-
-    for _ in range(20):  # up to ~2s for the server to bind
-        if _collector_healthy(host, port, timeout=0.5):
-            console.print(f"[green]anzen is up[/green] — collecting at "
-                          f"[bold]http://{host}:{port}/v1/traces[/bold] (pid {proc.pid})")
-            console.print(f"[dim]db: {db} · log: {log_path} · stop with: anzen down[/dim]")
-            return
-        timelib.sleep(0.1)
-
-    console.print(f"[red]Collector failed to start.[/red] See log: {log_path}")
-    raise typer.Exit(1)
-
-
-@app.command()
-def down() -> None:
-    """Stop the background collector."""
-    import os
-    import signal
-    import time as timelib
-
-    info = _read_pidfile()
-    if info is None:
-        console.print("[dim]No collector pidfile — nothing to stop.[/dim]")
-        return
-    pid = info["pid"]
-    try:
-        os.kill(pid, signal.SIGTERM)
-        for _ in range(20):
-            try:
-                os.kill(pid, 0)  # still alive?
-                timelib.sleep(0.1)
-            except ProcessLookupError:
-                break
-    except ProcessLookupError:
-        console.print("[dim]Collector was not running (stale pidfile).[/dim]")
-    _pidfile().unlink(missing_ok=True)
-    console.print("[green]anzen is down.[/green]")
-
-
-@app.command()
 def agents(db: str = _DB_OPTION) -> None:
     """The managed-agents view: every agent Anzen has seen, with live posture."""
     db = _db(db)
@@ -318,8 +238,9 @@ def agents(db: str = _DB_OPTION) -> None:
     store.close()
     if not rows:
         console.print("[dim]No agents observed yet. Connect one:[/dim]")
-        console.print("  · Claude Code: [green]anzen up[/green] then [green]anzen install-hook[/green]")
-        console.print("  · OpenInference agents: set [green]OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318[/green]")
+        console.print("  · Claude Code: [green]anzen install-hook[/green] (with the collector running)")
+        console.print("  · OpenInference agents: set "
+                      "[green]OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318[/green]")
         return
 
     table = Table(title="Managed agents")
@@ -337,19 +258,19 @@ def agents(db: str = _DB_OPTION) -> None:
 
 
 @app.command()
-def status(db: str = _DB_OPTION) -> None:
+def status(
+    db: str = _DB_OPTION,
+    port: int = typer.Option(DEFAULT_PORT, help="Collector port to health-check."),
+    host: str = typer.Option(DEFAULT_HOST, help="Collector host to health-check."),
+) -> None:
     """One-glance health: collector, database, captured activity, hook installation."""
     db = _db(db)
-    info = _read_pidfile()
-    running = bool(info) and _collector_healthy(info["host"], info["port"])
-
-    if running:
-        console.print(f"[green]●[/green] collector [green]running[/green] (pid {info['pid']}) — "
-                      f"http://{info['host']}:{info['port']}/v1/traces")
-    elif info:
-        console.print("[red]●[/red] collector [red]not responding[/red] (stale pidfile — try: anzen down, anzen up)")
+    if _collector_healthy(host, port):
+        console.print(f"[green]●[/green] collector [green]running[/green] — "
+                      f"http://{host}:{port}/v1/traces")
     else:
-        console.print("[red]●[/red] collector [red]not running[/red] — start with: [green]anzen up[/green]")
+        console.print("[red]●[/red] collector [red]not running[/red] — "
+                      "start with: [green]anzen serve[/green]")
 
     db_path = Path(db)
     size = f"{db_path.stat().st_size / 1024:.0f} KB" if db_path.exists() else "not created yet"
@@ -360,13 +281,7 @@ def status(db: str = _DB_OPTION) -> None:
     store.close()
     console.print(f"  captured: {stats['sessions']} sessions · {stats['actions']} actions · "
                   f"last activity: {_ago(stats['last_action_at'])}")
-
-    findings = stats["findings"]
-    if findings:
-        parts = [f"[{_SEV_STYLE[s]}]{findings[s]} {s}[/]" for s in SEVERITY_ORDER if findings.get(s)]
-        console.print(f"  findings: " + "  ".join(parts))
-    else:
-        console.print("  findings: [green]none[/green] [dim](auto-scan runs as actions arrive)[/dim]")
+    console.print(f"  findings: {_findings_cells(stats['findings'])}")
 
     hooks = []
     for scope, user_flag in (("project", False), ("user", True)):

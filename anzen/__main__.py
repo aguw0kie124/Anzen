@@ -1,4 +1,4 @@
-"""Allow `python -m anzen` (used by `anzen up` to spawn the collector)."""
+"""Allow `python -m anzen` as an alternative to the `anzen` console script."""
 
 from .cli import app
 

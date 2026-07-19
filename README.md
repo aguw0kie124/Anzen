@@ -17,10 +17,10 @@ pip install -e ".[dev]"     # dev extra pulls in the OTel SDK for tests
 ## Quick start
 
 ```bash
-# 1. Start the collector in the background (OTLP/HTTP on :4318)
-anzen up
+# 1. Start the collector (OTLP/HTTP on :4318) — leave this terminal running
+anzen serve
 
-# 2. Capture your Claude Code sessions automatically
+# 2. In another terminal: capture your Claude Code sessions automatically
 anzen install-hook          # ... then use Claude Code normally ...
 
 # 3. One-glance health: collector, activity, findings, hooks
@@ -30,14 +30,10 @@ anzen status
 anzen agents
 anzen list
 anzen show <id>
-
-# 5. Stop the background collector
-anzen down
 ```
 
-Everything lives in `~/.anzen/` (db, collector log, pidfile) — no flags needed
-anywhere. Override the location with `ANZEN_HOME`. `anzen serve` still runs the
-collector in the foreground for development.
+The database lives in `~/.anzen/` — no flags needed anywhere. Override the
+location with `ANZEN_HOME`.
 
 Point a real agent at it by setting its OTel exporter endpoint:
 
@@ -54,7 +50,7 @@ Anzen can capture every tool call your real Claude Code sessions make — no
 instrumentation, no API key:
 
 ```bash
-anzen up                    # collector running in the background
+anzen serve                 # collector running in another terminal
 anzen install-hook          # adds a PostToolUse hook to ./.claude/settings.json
 # ... use Claude Code normally (new sessions pick up the hook) ...
 anzen list                  # a "claude-code" session appears
@@ -71,9 +67,8 @@ collector address.
 
 | Command | Description |
 |---|---|
-| `anzen up` / `anzen down` | Start/stop the collector in the background. |
+| `anzen serve` | Run the collector (leave it running in a terminal). |
 | `anzen status` | Collector health, captured activity, findings, hook state. |
-| `anzen serve` | Run the collector in the foreground (dev). |
 | `anzen agents` | Every agent Anzen has seen: sessions, actions, last seen, findings. |
 | `anzen list` | List recorded sessions. |
 | `anzen show <id>` | The action timeline for a session — what the agent actually did. |

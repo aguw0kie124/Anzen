@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 
 def anzen_home() -> Path:
-    """Anzen's home directory (db, logs, pidfile). Override with ANZEN_HOME."""
+    """Anzen's home directory (database and logs). Override with ANZEN_HOME."""
     import os
 
     home = Path(os.environ.get("ANZEN_HOME", Path.home() / ".anzen"))
