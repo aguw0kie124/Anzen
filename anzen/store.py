@@ -121,6 +121,10 @@ CREATE TABLE IF NOT EXISTS findings (
 );
 CREATE INDEX IF NOT EXISTS idx_actions_session ON actions(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_findings_session ON findings(session_id);
+-- rule findings are deterministic per (rule, action): lets auto-scan on ingest
+-- and manual re-scans coexist without duplicates (INSERT OR IGNORE)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_rule_unique
+    ON findings(session_id, rule_id, action_id) WHERE source = 'rule';
 """
 
 
@@ -233,6 +237,35 @@ class Store:
             actions.append(Action(**data))
         return actions
 
+    def list_agents(self) -> list[dict]:
+        """Per-agent rollup for `anzen agents`: sessions, actions, last seen, findings."""
+        agents = []
+        rows = self._conn.execute(
+            "SELECT agent_name, COUNT(*) AS sessions, MAX(ended_at) AS last_seen "
+            "FROM sessions GROUP BY agent_name ORDER BY last_seen DESC"
+        ).fetchall()
+        for row in rows:
+            actions = self._conn.execute(
+                "SELECT COUNT(*) FROM actions JOIN sessions ON actions.session_id = sessions.id "
+                "WHERE sessions.agent_name = ?",
+                (row["agent_name"],),
+            ).fetchone()[0]
+            counts = self._conn.execute(
+                "SELECT severity, COUNT(*) FROM findings JOIN sessions ON findings.session_id = sessions.id "
+                "WHERE sessions.agent_name = ? GROUP BY severity",
+                (row["agent_name"],),
+            ).fetchall()
+            agents.append(
+                {
+                    "agent_name": row["agent_name"],
+                    "sessions": row["sessions"],
+                    "actions": actions,
+                    "last_seen": row["last_seen"],
+                    "finding_counts": {sev: n for sev, n in counts},
+                }
+            )
+        return agents
+
     def stats(self) -> dict:
         """Totals for `anzen status`: sessions, actions, findings by severity."""
         sessions = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
@@ -276,6 +309,28 @@ class Store:
                     for f in findings
                 ],
             )
+
+    def add_findings(self, findings: list[Finding]) -> int:
+        """Append findings, skipping any already recorded. Returns how many were new."""
+        now = datetime.now(timezone.utc).timestamp()
+        added = 0
+        with self._lock, self._conn:
+            for f in findings:
+                cur = self._conn.execute(
+                    """
+                    INSERT OR IGNORE INTO findings
+                        (session_id, action_id, rule_id, severity, owasp_llm, title,
+                         explanation, remediation, matched_excerpt, source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f.session_id, f.action_id, f.rule_id, f.severity, f.owasp_llm,
+                        f.title, f.explanation, f.remediation, f.matched_excerpt,
+                        f.source, now,
+                    ),
+                )
+                added += cur.rowcount
+        return added
 
     def get_findings(self, session_id: str) -> list[Finding]:
         rows = self._conn.execute(
