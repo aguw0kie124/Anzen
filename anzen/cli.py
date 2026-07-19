@@ -187,6 +187,93 @@ def report(
     store.close()
 
 
+_HOOK_MARKER = "anzen.claude_code_hook"
+
+
+def _settings_path(user: bool) -> "Path":
+    from pathlib import Path
+
+    base = Path.home() / ".claude" if user else Path.cwd() / ".claude"
+    return base / "settings.json"
+
+
+@app.command(name="install-hook")
+def install_hook(
+    user: bool = typer.Option(False, "--user", help="Install into ~/.claude/settings.json instead of ./.claude/settings.json."),
+    endpoint: str = typer.Option(None, "--endpoint", help="Collector endpoint if not the default http://127.0.0.1:4318."),
+) -> None:
+    """Capture Claude Code sessions: add a PostToolUse hook that streams tool calls to Anzen."""
+    import json as jsonlib
+
+    path = _settings_path(user)
+    settings = {}
+    if path.exists():
+        try:
+            settings = jsonlib.loads(path.read_text() or "{}")
+        except jsonlib.JSONDecodeError:
+            console.print(f"[red]{path} exists but is not valid JSON — fix it first, not overwriting.[/red]")
+            raise typer.Exit(1)
+
+    # Use the interpreter anzen is installed in — a bare `python3` may not
+    # have the anzen package importable (e.g. venv installs).
+    import sys as syslib
+
+    command = f'"{syslib.executable}" -m {_HOOK_MARKER}'
+    if endpoint:
+        command = f"ANZEN_ENDPOINT={endpoint} {command}"
+
+    post = settings.setdefault("hooks", {}).setdefault("PostToolUse", [])
+    for entry in post:
+        for hook in entry.get("hooks", []):
+            if _HOOK_MARKER in hook.get("command", ""):
+                hook["command"] = command  # already installed — refresh endpoint if changed
+                break
+        else:
+            continue
+        break
+    else:
+        post.append({"matcher": "*", "hooks": [{"type": "command", "command": command}]})
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(jsonlib.dumps(settings, indent=2) + "\n")
+    console.print(f"[green]Anzen hook installed[/green] in [cyan]{path}[/cyan]")
+    console.print("[dim]Takes effect in new Claude Code sessions. Remove with: anzen uninstall-hook"
+                  + (" --user" if user else "") + "[/dim]")
+
+
+@app.command(name="uninstall-hook")
+def uninstall_hook(
+    user: bool = typer.Option(False, "--user", help="Remove from ~/.claude/settings.json instead of ./.claude/settings.json."),
+) -> None:
+    """Remove the Anzen PostToolUse hook from Claude Code settings."""
+    import json as jsonlib
+
+    path = _settings_path(user)
+    if not path.exists():
+        console.print(f"[dim]{path} does not exist — nothing to remove.[/dim]")
+        return
+    settings = jsonlib.loads(path.read_text() or "{}")
+    post = settings.get("hooks", {}).get("PostToolUse", [])
+    removed = False
+    for entry in post[:]:
+        hooks = [h for h in entry.get("hooks", []) if _HOOK_MARKER not in h.get("command", "")]
+        if len(hooks) != len(entry.get("hooks", [])):
+            removed = True
+            if hooks:
+                entry["hooks"] = hooks
+            else:
+                post.remove(entry)
+    if settings.get("hooks", {}).get("PostToolUse") == []:
+        del settings["hooks"]["PostToolUse"]
+        if not settings["hooks"]:
+            del settings["hooks"]
+    path.write_text(jsonlib.dumps(settings, indent=2) + "\n")
+    console.print(
+        f"[green]Anzen hook removed[/green] from [cyan]{path}[/cyan]" if removed
+        else f"[dim]No Anzen hook found in {path}.[/dim]"
+    )
+
+
 @app.command()
 def demo(
     endpoint: str = typer.Option("http://localhost:4318", help="Running collector endpoint."),

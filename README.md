@@ -36,6 +36,25 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 Frameworks auto-instrumented with `openinference-instrumentation-*` packages
 emit the right span format out of the box.
 
+## Audit your own Claude Code
+
+Anzen can capture every tool call your real Claude Code sessions make — no
+instrumentation, no API key:
+
+```bash
+anzen serve                 # keep the collector running
+anzen install-hook          # adds a PostToolUse hook to ./.claude/settings.json
+# ... use Claude Code normally (new sessions pick up the hook) ...
+anzen list                  # a "claude-code" session appears
+anzen show <id>             # every command/file/edit it actually ran
+anzen scan <id>             # compliance check over the session
+```
+
+The hook is fail-safe: if the collector isn't running it exits silently in
+milliseconds and Claude Code is unaffected. Remove with `anzen uninstall-hook`.
+Use `--user` to install for all projects, `--endpoint` for a non-default
+collector address.
+
 ## Commands
 
 | Command | Description |
