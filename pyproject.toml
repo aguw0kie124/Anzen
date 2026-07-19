@@ -16,7 +16,6 @@ dependencies = [
 
 [project.optional-dependencies]
 llm = ["anthropic>=0.40"]
-demo = ["opentelemetry-sdk>=1.25", "opentelemetry-exporter-otlp-proto-http>=1.25"]
 dev = [
     "pytest>=8.0",
     "anthropic>=0.40",

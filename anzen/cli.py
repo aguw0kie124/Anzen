@@ -464,20 +464,5 @@ def uninstall_hook(
     )
 
 
-@app.command()
-def demo(
-    endpoint: str = typer.Option("http://localhost:4318", help="Running collector endpoint."),
-) -> None:
-    """Emit a synthetic risky agent session to a running collector."""
-    from .demo import run
-
-    console.print(f"Emitting demo session to [cyan]{endpoint}[/cyan]…")
-    session_id = run(endpoint)
-    console.print(
-        f"Sent session [bold]{session_id}[/bold]. "
-        f"Try [green]anzen list[/green] then [green]anzen show {session_id}[/green]."
-    )
-
-
 if __name__ == "__main__":
     app()

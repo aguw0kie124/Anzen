@@ -1,6 +1,6 @@
 """A REAL Gemini agent, OpenTelemetry-instrumented for Anzen.
 
-Unlike `anzen demo` (which hand-writes spans), this is a genuine agentic loop:
+A genuine agentic loop:
 Gemini decides which tools to call, the tools actually execute, and every model
 call and tool call is emitted as a `gen_ai.*` OTel span to a running Anzen
 collector. Anzen then logs and scans what the model *actually* did. (The span

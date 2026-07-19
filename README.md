@@ -11,7 +11,7 @@ manual scan step needed.
 ## Install
 
 ```bash
-pip install -e ".[dev]"     # dev extra pulls in the OTel SDK for demo/tests
+pip install -e ".[dev]"     # dev extra pulls in the OTel SDK for tests
 ```
 
 ## Quick start
@@ -20,8 +20,8 @@ pip install -e ".[dev]"     # dev extra pulls in the OTel SDK for demo/tests
 # 1. Start the collector in the background (OTLP/HTTP on :4318)
 anzen up
 
-# 2. Emit a synthetic agent session (or connect a real agent — see below)
-anzen demo
+# 2. Capture your Claude Code sessions automatically
+anzen install-hook          # ... then use Claude Code normally ...
 
 # 3. One-glance health: collector, activity, findings, hooks
 anzen status
@@ -29,7 +29,7 @@ anzen status
 # 4. Observe what the agent did — findings are already there (auto-scan)
 anzen agents
 anzen list
-anzen show demo-XXXX
+anzen show <id>
 
 # 5. Stop the background collector
 anzen down
@@ -79,7 +79,6 @@ collector address.
 | `anzen show <id>` | The action timeline for a session — what the agent actually did. |
 | `anzen scan <id> [--llm]` | Re-run the rules (e.g. with `--rules` extras) or add the Claude pass. |
 | `anzen report <id> [-o file]` | Render the audit report for a scanned session. |
-| `anzen demo` | Emit a synthetic risky session to a running collector. |
 
 ## How it works
 
