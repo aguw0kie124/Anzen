@@ -16,16 +16,26 @@ pip install -e ".[dev]"     # dev extra pulls in the OTel SDK for demo/tests
 ## Quick start
 
 ```bash
-# 1. Start the collector (OTLP/HTTP on :4318)
-anzen serve
+# 1. Start the collector in the background (OTLP/HTTP on :4318)
+anzen up
 
-# 2. In another terminal, emit a synthetic agent session
+# 2. Emit a synthetic agent session (or connect a real agent — see below)
 anzen demo
 
-# 3. Observe what the agent did
+# 3. One-glance health: collector, activity, findings, hooks
+anzen status
+
+# 4. Observe what the agent did
 anzen list
 anzen show demo-XXXX
+
+# 5. Stop the background collector
+anzen down
 ```
+
+Everything lives in `~/.anzen/` (db, collector log, pidfile) — no flags needed
+anywhere. Override the location with `ANZEN_HOME`. `anzen serve` still runs the
+collector in the foreground for development.
 
 Point a real agent at it by setting its OTel exporter endpoint:
 
@@ -42,7 +52,7 @@ Anzen can capture every tool call your real Claude Code sessions make — no
 instrumentation, no API key:
 
 ```bash
-anzen serve                 # keep the collector running
+anzen up                    # collector running in the background
 anzen install-hook          # adds a PostToolUse hook to ./.claude/settings.json
 # ... use Claude Code normally (new sessions pick up the hook) ...
 anzen list                  # a "claude-code" session appears
@@ -59,7 +69,9 @@ collector address.
 
 | Command | Description |
 |---|---|
-| `anzen serve` | Start the collector; records every span an agent sends. |
+| `anzen up` / `anzen down` | Start/stop the collector in the background. |
+| `anzen status` | Collector health, captured activity, findings, hook state. |
+| `anzen serve` | Run the collector in the foreground (dev). |
 | `anzen list` | List recorded sessions. |
 | `anzen show <id>` | The action timeline for a session — what the agent actually did. |
 | `anzen scan <id> [--llm]` | Run the compliance rules over a session (on demand). |

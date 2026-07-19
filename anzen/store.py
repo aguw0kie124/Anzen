@@ -13,7 +13,24 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field
+
+
+def anzen_home() -> Path:
+    """Anzen's home directory (db, logs, pidfile). Override with ANZEN_HOME."""
+    import os
+
+    home = Path(os.environ.get("ANZEN_HOME", Path.home() / ".anzen"))
+    home.mkdir(parents=True, exist_ok=True)
+    return home
+
+
+def default_db() -> str:
+    """Default database path: ~/.anzen/anzen.db (zero-config for every command)."""
+    return str(anzen_home() / "anzen.db")
+
 
 DEFAULT_DB = "anzen.db"
 
@@ -215,6 +232,23 @@ class Store:
             data["raw_attributes"] = json.loads(data["raw_attributes"])
             actions.append(Action(**data))
         return actions
+
+    def stats(self) -> dict:
+        """Totals for `anzen status`: sessions, actions, findings by severity."""
+        sessions = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        actions = self._conn.execute("SELECT COUNT(*) FROM actions").fetchone()[0]
+        last_action = self._conn.execute("SELECT MAX(timestamp) FROM actions").fetchone()[0]
+        severities = dict(
+            self._conn.execute(
+                "SELECT severity, COUNT(*) FROM findings GROUP BY severity"
+            ).fetchall()
+        )
+        return {
+            "sessions": sessions,
+            "actions": actions,
+            "last_action_at": last_action,
+            "findings": severities,
+        }
 
     # -- findings ----------------------------------------------------------
 
