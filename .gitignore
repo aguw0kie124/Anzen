@@ -1,0 +1,18 @@
+# Anzen runtime artifacts
+anzen.db
+anzen.db-wal
+anzen.db-shm
+*.db
+report.md
+serve.log
+
+# Example agent scratch workspace (regenerated on run)
+examples/agent-workspace/
+
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+build/
+dist/

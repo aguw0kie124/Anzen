@@ -1,0 +1,320 @@
+# Anzen built-in rule pack.
+# Categories map to the OWASP Top 10 for LLM Applications (2025):
+#   LLM01 Prompt Injection · LLM02 Sensitive Information Disclosure ·
+#   LLM05 Improper Output Handling · LLM06 Excessive Agency
+
+# ── Secrets & credentials ────────────────────────────────────────────────
+
+- id: SEC-001
+  title: Secret material exposed in agent context
+  severity: critical
+  owasp_llm: LLM02
+  match:
+    field: raw
+    any_regex:
+      - 'sk-ant-[A-Za-z0-9_-]{20,}'
+      - 'AKIA[0-9A-Z]{16}'
+      - '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----'
+      - 'ghp_[A-Za-z0-9]{36}'
+      - 'xox[baprs]-[A-Za-z0-9-]{10,}'
+  explanation: >
+    A live credential (API key, access key, or private key) appeared in the
+    agent's context. Anything in context can be echoed into logs, model
+    provider traffic, subsequent tool calls, or the final response — the
+    credential must now be treated as compromised.
+  remediation: >
+    Rotate the exposed credential immediately. Move secrets out of files and
+    environment locations the agent can read; grant the agent scoped,
+    short-lived credentials via a broker instead of raw keys.
+
+- id: SEC-002
+  title: Agent accessed a credential store or secrets file
+  severity: medium
+  owasp_llm: LLM02
+  applies_to: [tool_call]
+  match:
+    field: input
+    any_regex:
+      - '(^|[\s/"''])\.env(\.[A-Za-z]+)?\b'
+      - '\.aws/credentials'
+      - '\bid_(rsa|ed25519|ecdsa)\b'
+      - '(?i)\bsecrets?\.(json|ya?ml|toml)\b'
+      - '\.pem\b'
+      - '\.npmrc\b'
+      - '\.netrc\b'
+  explanation: >
+    The agent read (or attempted to read) a file that conventionally holds
+    credentials. Even if no secret was matched in the output, the contents
+    entered the agent's context and may leak through later actions.
+  remediation: >
+    Deny the agent filesystem access to credential paths (sandbox allowlist
+    or read filters). If the task required config values, expose only the
+    non-secret keys it needs.
+
+- id: SEC-003
+  title: Password or API key assignment visible in agent data
+  severity: medium
+  owasp_llm: LLM02
+  match:
+    field: raw
+    any_regex:
+      - '(?i)\b(password|passwd|api[_-]?key|client[_-]?secret|auth[_-]?token)["'']?\s*[:=]\s*["''][^"'']{6,}["'']'
+  explanation: >
+    A key-value pair that looks like a credential assignment passed through
+    the agent's context. This is a weaker signal than a recognized key format
+    but still indicates secret material in reach of the model.
+  remediation: >
+    Confirm whether the value is a real credential; rotate it if so. Scrub
+    config files of inline secrets and reference a secret manager instead.
+
+# ── Destructive operations ───────────────────────────────────────────────
+
+- id: DST-001
+  title: Recursive/forced filesystem deletion
+  severity: high
+  owasp_llm: LLM06
+  applies_to: [tool_call]
+  match:
+    field: input
+    any_regex:
+      - '\brm\s+(-[A-Za-z]*r[A-Za-z]*f|-[A-Za-z]*f[A-Za-z]*r)[A-Za-z]*\b'
+      - '\bshutil\.rmtree\('
+      - '(?i)\brmdir\s+/s\b'
+  explanation: >
+    The agent executed a recursive forced delete. This class of command
+    destroys data irreversibly and is a leading cause of agent incidents —
+    especially when the path comes from model-generated text.
+  remediation: >
+    Gate delete operations behind human confirmation or a dedicated tool with
+    an allowlisted path scope. Run the agent in a workspace where recursive
+    deletes cannot reach data that matters.
+
+- id: DST-002
+  title: Destructive SQL statement
+  severity: high
+  owasp_llm: LLM06
+  match:
+    field: raw
+    any_regex:
+      - '(?i)\bDROP\s+(TABLE|DATABASE|SCHEMA)\b'
+      - '(?i)\bTRUNCATE\s+TABLE\b'
+      - '(?i)\bDELETE\s+FROM\s+[`"\[]?\w+[`"\]]?\s*(;|$)'
+  explanation: >
+    The agent issued SQL that drops or mass-deletes data (a DELETE without a
+    WHERE clause, DROP, or TRUNCATE). If pointed at a production database,
+    this is unrecoverable without backups.
+  remediation: >
+    Give agents read-only database credentials unless writes are required;
+    route schema-changing or bulk-delete statements through a migration/review
+    process the agent cannot bypass.
+
+- id: DST-003
+  title: Git history rewrite or force push
+  severity: medium
+  owasp_llm: LLM06
+  applies_to: [tool_call]
+  match:
+    field: input
+    any_regex:
+      - 'git\s+push\s+[^\n]*(--force\b|-f\b)'
+      - 'git\s+reset\s+--hard'
+      - 'git\s+clean\s+-[A-Za-z]*f'
+  explanation: >
+    The agent ran a git command that discards or rewrites history. On a shared
+    branch this destroys other contributors' work and is difficult to recover.
+  remediation: >
+    Block force pushes at the remote (branch protection). Have agents work on
+    dedicated branches and open pull requests instead of pushing directly.
+
+- id: DST-004
+  title: World-writable permissions granted
+  severity: medium
+  owasp_llm: LLM06
+  applies_to: [tool_call]
+  match:
+    field: input
+    any_regex:
+      - '\bchmod\s+(-R\s+)?0?777\b'
+      - '\bchmod\s+(-R\s+)?a\+rwx\b'
+  explanation: >
+    The agent made files world-writable, allowing any local process or user to
+    modify them — a common persistence and privilege-escalation vector.
+  remediation: >
+    Revert the permission change. Constrain the agent's chmod usage to the
+    minimal modes the task needs, or handle permissions outside the agent.
+
+# ── Exfiltration ─────────────────────────────────────────────────────────
+
+- id: EXF-001
+  title: Outbound data upload from shell
+  severity: high
+  owasp_llm: LLM02
+  applies_to: [tool_call]
+  match:
+    field: input
+    any_regex:
+      - '\bcurl\b[^\n]*\s(-d|--data(-\w+)?|--upload-file|-F|-T)\b'
+      - '\bwget\b[^\n]*--post-(data|file)\b'
+      - '\bcurl\b[^\n]*-X\s*(POST|PUT)\b'
+  explanation: >
+    The agent pushed data to an external host from a shell command. Combined
+    with earlier reads of sensitive files, this is the signature of data
+    exfiltration — deliberate or prompt-injected.
+  remediation: >
+    Restrict the agent's network egress to an allowlist of required hosts.
+    Review what data was sent and to where; treat any transmitted secrets as
+    compromised.
+
+- id: EXF-002
+  title: Encoded payload piped to the network
+  severity: high
+  owasp_llm: LLM02
+  applies_to: [tool_call]
+  match:
+    field: input
+    any_regex:
+      - '\bbase64\b[^\n]*\|\s*(curl|wget|nc)\b'
+      - '\b(curl|wget)\b[^\n]*\$\(\s*base64\b'
+  explanation: >
+    The agent base64-encoded data and sent it over the network. Encoding
+    before transmission is a classic exfiltration-obfuscation pattern with few
+    legitimate uses in agent workflows.
+  remediation: >
+    Block the destination and review what was encoded. Lock down egress and
+    audit the session for the source of this instruction (possible prompt
+    injection in earlier tool output).
+
+- id: EXF-003
+  title: Raw socket / netcat network activity
+  severity: high
+  owasp_llm: LLM02
+  applies_to: [tool_call]
+  match:
+    field: input
+    any_regex:
+      - '(^|[;&|]\s*)nc(\.traditional)?\s+[\w.-]+\s+\d{2,5}\b'
+      - '\b/dev/tcp/[\w.-]+/\d+'
+  explanation: >
+    The agent opened a raw network connection (netcat or bash /dev/tcp).
+    Legitimate agent tasks almost never need raw sockets; this pattern is
+    associated with reverse shells and covert channels.
+  remediation: >
+    Terminate the session and inspect the destination host. Remove netcat
+    from the agent's environment and enforce egress filtering.
+
+# ── PII ──────────────────────────────────────────────────────────────────
+
+- id: PII-001
+  title: US Social Security number in agent data
+  severity: medium
+  owasp_llm: LLM02
+  match:
+    field: raw
+    any_regex:
+      - '\b\d{3}-\d{2}-\d{4}\b'
+  explanation: >
+    A value formatted like a US Social Security number passed through the
+    agent's context. Processing SSNs through an LLM pipeline may violate
+    privacy policy and regulation (e.g. state privacy laws, GLBA).
+  remediation: >
+    Mask or tokenize SSNs before they reach the agent. Verify the data source
+    and confirm whether this processing is covered by your privacy notices.
+
+- id: PII-002
+  title: Payment card number in agent data
+  severity: medium
+  owasp_llm: LLM02
+  match:
+    field: raw
+    any_regex:
+      - '\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6011)([ -]?)\d{4}\1\d{4}\1\d{1,4}\b'
+  explanation: >
+    A value shaped like a payment card number (Visa/Mastercard/Amex/Discover
+    prefix) entered the agent's context. Card data in LLM pipelines is a PCI
+    DSS scope violation in most environments.
+  remediation: >
+    Purge the data from logs and stores, mask card numbers upstream, and keep
+    agent pipelines out of PCI scope by tokenizing before ingestion.
+
+# ── Excessive agency / privilege ─────────────────────────────────────────
+
+- id: AGY-001
+  title: Privilege escalation attempt
+  severity: high
+  owasp_llm: LLM06
+  applies_to: [tool_call]
+  match:
+    field: input
+    any_regex:
+      - '(^|[;&|]\s*)sudo\s'
+      - '\bsu\s+(-\s+)?root\b'
+  explanation: >
+    The agent invoked sudo or switched to root. An agent that escalates
+    privileges can affect the whole host, far beyond its intended task scope.
+  remediation: >
+    Run agents as an unprivileged user with no sudo grant. If a task truly
+    needs elevated actions, wrap them in a narrowly scoped, audited tool.
+
+- id: AGY-002
+  title: Package installation by agent
+  severity: low
+  owasp_llm: LLM06
+  applies_to: [tool_call]
+  match:
+    field: input
+    any_regex:
+      - '\b(pip3?|npm|pnpm|yarn|brew|apt(-get)?|dnf|cargo)\s+(install|add)\b'
+      - '\buv\s+(pip\s+install|add)\b'
+  explanation: >
+    The agent installed software. Model-chosen package names are a supply
+    chain risk (typosquats, malicious lookalikes) and change the environment
+    beyond the session.
+  remediation: >
+    Pin dependencies and install them before the agent runs. If runtime
+    installs are necessary, restrict the package source to an internal index
+    or an approved allowlist.
+
+- id: AGY-003
+  title: Write to system or SSH configuration
+  severity: critical
+  owasp_llm: LLM06
+  applies_to: [tool_call]
+  match:
+    field: input
+    any_regex:
+      - '(>>?|\btee\b)\s*/etc/'
+      - '/etc/(passwd|shadow|sudoers)\b'
+      - '\.ssh/authorized_keys\b'
+      - '(?i)crontab\s+-'
+  explanation: >
+    The agent wrote to system configuration, SSH authorized_keys, or cron —
+    locations used to establish persistence or grant future access. This is
+    far outside normal task scope for an AI agent.
+  remediation: >
+    Revert the modified files from a known-good source and audit for added
+    keys or scheduled jobs. Run agents in containers with a read-only system
+    filesystem.
+
+# ── Prompt injection ─────────────────────────────────────────────────────
+
+- id: INJ-001
+  title: Prompt-injection marker in tool output
+  severity: high
+  owasp_llm: LLM01
+  applies_to: [tool_call]
+  match:
+    field: output
+    ignore_case: true
+    any_regex:
+      - 'ignore\s+(all\s+|any\s+)?(previous|prior|above)\s+instructions'
+      - 'disregard\s+(the\s+)?(above|previous|system)'
+      - 'you\s+are\s+now\s+(in\s+)?(developer|dan)\s*mode'
+      - '<\s*system\s*>|\bsystem\s+prompt\s*:'
+  explanation: >
+    Content returned by a tool (web page, file, API response) contains
+    instruction-override language aimed at the model. If the agent followed
+    it, subsequent actions in this session may be attacker-directed.
+  remediation: >
+    Treat all downstream actions in this session as suspect and review them.
+    Sanitize or sandbox untrusted tool content, and require confirmation for
+    sensitive actions that follow external content reads.
