@@ -5,7 +5,8 @@ A simple observation and audit tool for AI agents. Point any
 OpenAI/Anthropic SDK instrumentations) at Anzen and it records every action
 the agent takes into a local SQLite log
 you can inspect at any time. A compliance rule pack (OWASP LLM Top 10 mapped)
-can be run over any recorded session on demand.
+runs automatically as actions arrive, so findings are always current — no
+manual scan step needed.
 
 ## Install
 
@@ -25,7 +26,8 @@ anzen demo
 # 3. One-glance health: collector, activity, findings, hooks
 anzen status
 
-# 4. Observe what the agent did
+# 4. Observe what the agent did — findings are already there (auto-scan)
+anzen agents
 anzen list
 anzen show demo-XXXX
 
@@ -57,7 +59,7 @@ anzen install-hook          # adds a PostToolUse hook to ./.claude/settings.json
 # ... use Claude Code normally (new sessions pick up the hook) ...
 anzen list                  # a "claude-code" session appears
 anzen show <id>             # every command/file/edit it actually ran
-anzen scan <id>             # compliance check over the session
+anzen report <id>           # audit report — findings were recorded live
 ```
 
 The hook is fail-safe: if the collector isn't running it exits silently in
@@ -72,25 +74,30 @@ collector address.
 | `anzen up` / `anzen down` | Start/stop the collector in the background. |
 | `anzen status` | Collector health, captured activity, findings, hook state. |
 | `anzen serve` | Run the collector in the foreground (dev). |
+| `anzen agents` | Every agent Anzen has seen: sessions, actions, last seen, findings. |
 | `anzen list` | List recorded sessions. |
 | `anzen show <id>` | The action timeline for a session — what the agent actually did. |
-| `anzen scan <id> [--llm]` | Run the compliance rules over a session (on demand). |
+| `anzen scan <id> [--llm]` | Re-run the rules (e.g. with `--rules` extras) or add the Claude pass. |
 | `anzen report <id> [-o file]` | Render the audit report for a scanned session. |
 | `anzen demo` | Emit a synthetic risky session to a running collector. |
 
 ## How it works
 
 ```
-OpenInference agent ──OTLP/HTTP──▶ anzen serve ──▶ SQLite (anzen.db)
-                                                       │
-                                anzen show (observe) · anzen scan/report (audit)
+OpenInference agent ──OTLP/HTTP──▶ collector ──▶ normalize ──▶ SQLite (~/.anzen/anzen.db)
+                                                    │
+                                          auto-scan (rule pack)
+                                                    │
+                     anzen agents/list/show (observe) · anzen report/scan --llm (audit)
 ```
 
 - **Observe (the core):** the collector normalizes OpenInference spans
   (`openinference.span.kind`, `tool.name`, `input.value`, `output.value`) into
   a uniform action log. Unrecognized spans are kept raw — nothing is dropped.
-- **Audit (on demand):** `anzen scan` checks a session against YAML rules
-  (secrets, destructive commands, exfiltration, PII, prompt injection); every
-  finding carries an explanation and a remediation. `--llm` adds a Claude
-  contextual pass. See `anzen/rules_builtin.yaml` for the format; drop extra
-  rules in a directory and pass `--rules`.
+- **Audit (continuous):** every stored action is immediately checked against
+  the YAML rule pack (secrets, destructive commands, exfiltration, PII, prompt
+  injection); every finding carries an explanation and a remediation, and shows
+  up live in `anzen status` / `anzen agents` / `anzen list`. `anzen scan`
+  re-runs the rules on demand (e.g. with `--rules` for extra packs) and
+  `--llm` adds a Claude contextual pass. See `anzen/rules_builtin.yaml` for
+  the rule format.

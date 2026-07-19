@@ -34,6 +34,25 @@ _SEV_STYLE = {
 }
 
 
+def _ago(timestamp: float | None) -> str:
+    """Humanize a unix timestamp as time elapsed ('42s ago', '3m ago')."""
+    from datetime import datetime, timezone
+
+    if not timestamp:
+        return "never"
+    delta = datetime.now(timezone.utc).timestamp() - timestamp
+    if delta < 120:
+        return f"{delta:.0f}s ago"
+    if delta < 7200:
+        return f"{delta / 60:.0f}m ago"
+    return f"{delta / 3600:.1f}h ago"
+
+
+def _findings_cells(counts: dict[str, int]) -> str:
+    parts = [f"[{_SEV_STYLE[sev]}]{counts[sev]} {sev}[/]" for sev in SEVERITY_ORDER if counts.get(sev)]
+    return "  ".join(parts) or "[green]clean[/green]"
+
+
 def _version_callback(value: bool) -> None:
     if value:
         console.print(f"anzen {__version__}")
@@ -57,11 +76,14 @@ def serve(
 ) -> None:
     """Start the collector: receive and record agent telemetry (OpenInference over OTLP)."""
     from .collector import make_server
+    from .rules import load_rules
 
     db = _db(db)
     store = Store(db)
-    server = make_server(store, host=host, port=port)
-    console.print(f"[bold]anzen[/bold] collector · db=[cyan]{db}[/cyan]")
+    rules = load_rules()
+    server = make_server(store, host=host, port=port, rules=rules)
+    console.print(f"[bold]anzen[/bold] collector · db=[cyan]{db}[/cyan] · "
+                  f"auto-scan: [green]{len(rules)} rules[/green]")
     console.print(f"listening on [green]http://{host}:{port}/v1/traces[/green]")
     console.print("[dim]inspect with: anzen list · anzen show <session>[/dim]")
     try:
@@ -89,11 +111,7 @@ def list_sessions(db: str = _DB_OPTION) -> None:
     table.add_column("Actions", justify="right")
     table.add_column("Findings")
     for s in sessions:
-        parts = []
-        for sev in SEVERITY_ORDER:
-            if s.finding_counts.get(sev):
-                parts.append(f"[{_SEV_STYLE[sev]}]{s.finding_counts[sev]} {sev}[/]")
-        table.add_row(s.id, s.agent_name, str(s.action_count), "  ".join(parts) or "[green]clean[/green]")
+        table.add_row(s.id, s.agent_name, str(s.action_count), _findings_cells(s.finding_counts))
     console.print(table)
     store.close()
 
@@ -292,10 +310,35 @@ def down() -> None:
 
 
 @app.command()
+def agents(db: str = _DB_OPTION) -> None:
+    """The managed-agents view: every agent Anzen has seen, with live posture."""
+    db = _db(db)
+    store = Store(db)
+    rows = store.list_agents()
+    store.close()
+    if not rows:
+        console.print("[dim]No agents observed yet. Connect one:[/dim]")
+        console.print("  · Claude Code: [green]anzen up[/green] then [green]anzen install-hook[/green]")
+        console.print("  · OpenInference agents: set [green]OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318[/green]")
+        return
+
+    table = Table(title="Managed agents")
+    table.add_column("Agent", style="cyan")
+    table.add_column("Sessions", justify="right")
+    table.add_column("Actions", justify="right")
+    table.add_column("Last seen")
+    table.add_column("Findings")
+    for a in rows:
+        table.add_row(
+            a["agent_name"], str(a["sessions"]), str(a["actions"]),
+            _ago(a["last_seen"]), _findings_cells(a["finding_counts"]),
+        )
+    console.print(table)
+
+
+@app.command()
 def status(db: str = _DB_OPTION) -> None:
     """One-glance health: collector, database, captured activity, hook installation."""
-    from datetime import datetime, timezone
-
     db = _db(db)
     info = _read_pidfile()
     running = bool(info) and _collector_healthy(info["host"], info["port"])
@@ -315,19 +358,15 @@ def status(db: str = _DB_OPTION) -> None:
     store = Store(db)
     stats = store.stats()
     store.close()
-    last = stats["last_action_at"]
-    last_str = "never"
-    if last:
-        delta = datetime.now(timezone.utc).timestamp() - last
-        last_str = f"{delta:.0f}s ago" if delta < 120 else f"{delta / 60:.0f}m ago" if delta < 7200 else f"{delta / 3600:.1f}h ago"
-    console.print(f"  captured: {stats['sessions']} sessions · {stats['actions']} actions · last activity: {last_str}")
+    console.print(f"  captured: {stats['sessions']} sessions · {stats['actions']} actions · "
+                  f"last activity: {_ago(stats['last_action_at'])}")
 
     findings = stats["findings"]
     if findings:
         parts = [f"[{_SEV_STYLE[s]}]{findings[s]} {s}[/]" for s in SEVERITY_ORDER if findings.get(s)]
         console.print(f"  findings: " + "  ".join(parts))
     else:
-        console.print("  findings: [green]none recorded[/green] [dim](run anzen scan <session>)[/dim]")
+        console.print("  findings: [green]none[/green] [dim](auto-scan runs as actions arrive)[/dim]")
 
     hooks = []
     for scope, user_flag in (("project", False), ("user", True)):
