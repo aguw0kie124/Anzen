@@ -5,8 +5,7 @@ A simple observation and audit tool for AI agents. Point any
 OpenAI/Anthropic SDK instrumentations) at Anzen and it records every action
 the agent takes into a local SQLite log
 you can inspect at any time. A compliance rule pack (OWASP LLM Top 10 mapped)
-runs automatically as actions arrive, so findings are always current — no
-manual scan step needed.
+runs automatically as actions arrive, so findings are always current.
 
 ## Install
 
@@ -45,8 +44,8 @@ emit the right span format out of the box.
 
 ## Audit your own Claude Code
 
-Anzen can capture every tool call your real Claude Code sessions make — no
-instrumentation, no API key:
+Anzen can capture every tool call your real Claude Code sessions make with no
+instrumentation or API key:
 
 ```bash
 anzen serve                 # collector running in another terminal
