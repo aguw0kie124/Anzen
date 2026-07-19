@@ -94,34 +94,37 @@ def _excerpt(text: str, match: re.Match[str]) -> str:
     return prefix + text[start:end].replace("\n", " ") + suffix
 
 
-def scan_actions(actions: list[Action], rules: list[Rule]) -> list[Finding]:
+def match_action(action: Action, rules: list[Rule]) -> list[Finding]:
+    """Run every rule against one action (at most one finding per rule)."""
     findings: list[Finding] = []
     for rule in rules:
-        patterns = rule.compiled()
-        for action in actions:
-            if rule.applies_to is not None and action.action_type not in rule.applies_to:
-                continue
-            text = _field_text(action, rule.match.field)
-            if not text:
-                continue
-            for pattern in patterns:
-                match = pattern.search(text)
-                if match:
-                    findings.append(
-                        Finding(
-                            session_id=action.session_id,
-                            action_id=action.id,
-                            rule_id=rule.id,
-                            severity=rule.severity,
-                            owasp_llm=rule.owasp_llm,
-                            title=rule.title,
-                            explanation=rule.explanation,
-                            remediation=rule.remediation,
-                            matched_excerpt=_excerpt(text, match),
-                        )
+        if rule.applies_to is not None and action.action_type not in rule.applies_to:
+            continue
+        text = _field_text(action, rule.match.field)
+        if not text:
+            continue
+        for pattern in rule.compiled():
+            match = pattern.search(text)
+            if match:
+                findings.append(
+                    Finding(
+                        session_id=action.session_id,
+                        action_id=action.id,
+                        rule_id=rule.id,
+                        severity=rule.severity,
+                        owasp_llm=rule.owasp_llm,
+                        title=rule.title,
+                        explanation=rule.explanation,
+                        remediation=rule.remediation,
+                        matched_excerpt=_excerpt(text, match),
                     )
-                    break  # one finding per (rule, action)
+                )
+                break  # one finding per (rule, action)
     return findings
+
+
+def scan_actions(actions: list[Action], rules: list[Rule]) -> list[Finding]:
+    return [finding for action in actions for finding in match_action(action, rules)]
 
 
 def scan_session(store: Store, session_id: str, rules: list[Rule]) -> list[Finding]:

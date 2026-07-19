@@ -2,7 +2,7 @@
 
 import pytest
 
-from anzen.rules import load_rules, scan_actions
+from anzen.rules import load_rules, match_action, scan_actions
 from anzen.store import Action, ActionType
 
 
@@ -79,6 +79,19 @@ def test_one_finding_per_rule_and_action(rules):
     action = _tool(output="AKIAIOSFODNN7EXAMPLE and AKIAIOSFODNN7EXAMPL2")
     findings = [f for f in scan_actions([action], rules) if f.rule_id == "SEC-001"]
     assert len(findings) == 1
+
+
+def test_match_action_equals_scan_actions(rules):
+    # the single-action entry point (used by scan-on-ingest) must agree with a full scan
+    actions = [
+        _tool(input_='{"command": "rm -rf /tmp/x"}'),
+        _tool(output="key=AKIAIOSFODNN7EXAMPLE and ssn 123-45-6789"),
+        _tool(input_="harmless", output="harmless"),
+    ]
+    per_action = [f for a in actions for f in match_action(a, rules)]
+    full_scan = scan_actions(actions, rules)
+    assert per_action == full_scan
+    assert len(full_scan) >= 3  # the risky actions actually fired rules
 
 
 def test_extra_rules_directory(tmp_path):
