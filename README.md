@@ -23,11 +23,10 @@ anzen serve
 # 2. In another terminal: capture your Claude Code sessions automatically
 anzen install-hook          # ... then use Claude Code normally ...
 
-# 3. One-glance health: collector, activity, findings, hooks
+# 3. One glance: collector health, agents seen, findings, hooks
 anzen status
 
 # 4. Observe what the agent did — findings are already there (auto-scan)
-anzen agents
 anzen list
 anzen show <id>
 ```
@@ -69,11 +68,9 @@ collector address.
 |---|---|
 | `anzen serve` | Run the collector (leave it running in a terminal). |
 | `anzen status` | Collector health, captured activity, findings, hook state. |
-| `anzen agents` | Every agent Anzen has seen: sessions, actions, last seen, findings. |
 | `anzen list` | List recorded sessions. |
 | `anzen show <id>` | The action timeline for a session — what the agent actually did. |
-| `anzen scan <id> [--llm]` | Re-run the rules (e.g. with `--rules` extras) or add the Claude pass. |
-| `anzen report <id> [-o file]` | Render the audit report for a scanned session. |
+| `anzen report <id> [-o file] [--llm] [--rules dir]` | The audit report; `--llm` adds the Claude pass, `--rules` re-scans with an extra pack. |
 
 ## How it works
 
@@ -82,7 +79,7 @@ OpenInference agent ──OTLP/HTTP──▶ collector ──▶ normalize ─�
                                                     │
                                           auto-scan (rule pack)
                                                     │
-                     anzen agents/list/show (observe) · anzen report/scan --llm (audit)
+                       anzen status/list/show (observe) · anzen report (audit)
 ```
 
 - **Observe (the core):** the collector normalizes OpenInference spans
@@ -91,7 +88,6 @@ OpenInference agent ──OTLP/HTTP──▶ collector ──▶ normalize ─�
 - **Audit (continuous):** every stored action is immediately checked against
   the YAML rule pack (secrets, destructive commands, exfiltration, PII, prompt
   injection); every finding carries an explanation and a remediation, and shows
-  up live in `anzen status` / `anzen agents` / `anzen list`. `anzen scan`
-  re-runs the rules on demand (e.g. with `--rules` for extra packs) and
-  `--llm` adds a Claude contextual pass. See `anzen/rules_builtin.yaml` for
-  the rule format.
+  up live in `anzen status` / `anzen list`. `anzen report --rules <dir>`
+  re-scans with an extra pack and `--llm` adds a Claude contextual pass. See
+  `anzen/rules_builtin.yaml` for the rule format.

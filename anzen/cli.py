@@ -160,14 +160,19 @@ def show(
 
 
 @app.command()
-def scan(
+def report(
     session_id: str = typer.Argument(..., help="Session id (or unique prefix)."),
     db: str = _DB_OPTION,
-    rules_dir: str = typer.Option(None, "--rules", help="Extra rules directory."),
-    llm: bool = typer.Option(False, "--llm", help="Add a Claude contextual analysis pass."),
+    out: str = typer.Option(None, "-o", "--out", help="Write Markdown report to this path."),
+    rules_dir: str = typer.Option(None, "--rules", help="Re-scan with an extra rules directory."),
+    llm: bool = typer.Option(False, "--llm", help="Add a Claude contextual analysis pass first."),
 ) -> None:
-    """Re-run deterministic rules (and optionally the Claude analysis pass)."""
-    from .rules import load_rules, scan_session
+    """Render the audit report for a session (terminal + optional file).
+
+    Rules already ran automatically as actions arrived; `--rules` re-scans with
+    an extra pack and `--llm` adds the cross-action Claude pass before rendering.
+    """
+    from .report import build_report
 
     db = _db(db)
     store = Store(db)
@@ -176,38 +181,23 @@ def scan(
         console.print(f"[red]No session matching '{session_id}'.[/red]")
         raise typer.Exit(1)
 
-    rules = load_rules(rules_dir)
-    findings = scan_session(store, session.id, rules)
-    console.print(f"Deterministic scan: [bold]{len(findings)}[/bold] finding(s).")
+    if rules_dir:
+        from .rules import load_rules, scan_session
+
+        findings = scan_session(store, session.id, load_rules(rules_dir))
+        console.print(f"[dim]Re-scanned with {rules_dir}: {len(findings)} finding(s).[/dim]")
 
     if llm:
         from .llm import LlmUnavailable, analyze_session
 
         try:
             llm_findings = analyze_session(store, session.id)
-            console.print(f"Claude analysis: [bold]{len(llm_findings)}[/bold] contextual finding(s).")
+            console.print(f"[dim]Claude analysis: {len(llm_findings)} contextual finding(s).[/dim]")
         except LlmUnavailable as exc:
             console.print(f"[yellow]LLM pass skipped:[/yellow] {exc}")
 
-    total = len(store.get_findings(session.id))
-    console.print(f"Total findings for [cyan]{session.id}[/cyan]: [bold]{total}[/bold]. "
-                  f"Run [green]anzen report {session.id}[/green] for the full audit.")
-    store.close()
-
-
-@app.command()
-def report(
-    session_id: str = typer.Argument(..., help="Session id (or unique prefix)."),
-    db: str = _DB_OPTION,
-    out: str = typer.Option(None, "-o", "--out", help="Write Markdown report to this path."),
-) -> None:
-    """Render the audit report for a session (terminal + optional file)."""
-    from .report import build_report
-
-    db = _db(db)
-    store = Store(db)
     try:
-        session, markdown = build_report(store, session_id)
+        session, markdown = build_report(store, session.id)
     except KeyError:
         console.print(f"[red]No session matching '{session_id}'.[/red]")
         raise typer.Exit(1)
@@ -230,40 +220,12 @@ def _collector_healthy(host: str, port: int, timeout: float = 1.0) -> bool:
 
 
 @app.command()
-def agents(db: str = _DB_OPTION) -> None:
-    """The managed-agents view: every agent Anzen has seen, with live posture."""
-    db = _db(db)
-    store = Store(db)
-    rows = store.list_agents()
-    store.close()
-    if not rows:
-        console.print("[dim]No agents observed yet. Connect one:[/dim]")
-        console.print("  · Claude Code: [green]anzen install-hook[/green] (with the collector running)")
-        console.print("  · OpenInference agents: set "
-                      "[green]OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318[/green]")
-        return
-
-    table = Table(title="Managed agents")
-    table.add_column("Agent", style="cyan")
-    table.add_column("Sessions", justify="right")
-    table.add_column("Actions", justify="right")
-    table.add_column("Last seen")
-    table.add_column("Findings")
-    for a in rows:
-        table.add_row(
-            a["agent_name"], str(a["sessions"]), str(a["actions"]),
-            _ago(a["last_seen"]), _findings_cells(a["finding_counts"]),
-        )
-    console.print(table)
-
-
-@app.command()
 def status(
     db: str = _DB_OPTION,
     port: int = typer.Option(DEFAULT_PORT, help="Collector port to health-check."),
     host: str = typer.Option(DEFAULT_HOST, help="Collector host to health-check."),
 ) -> None:
-    """One-glance health: collector, database, captured activity, hook installation."""
+    """One glance: collector health, agents seen, findings, hook installation."""
     db = _db(db)
     if _collector_healthy(host, port):
         console.print(f"[green]●[/green] collector [green]running[/green] — "
@@ -278,6 +240,7 @@ def status(
 
     store = Store(db)
     stats = store.stats()
+    agent_rows = store.list_agents()
     store.close()
     console.print(f"  captured: {stats['sessions']} sessions · {stats['actions']} actions · "
                   f"last activity: {_ago(stats['last_action_at'])}")
@@ -290,6 +253,26 @@ def status(
             hooks.append(scope)
     hook_str = ", ".join(hooks) if hooks else "not installed [dim](anzen install-hook)[/dim]"
     console.print(f"  claude-code hook: {hook_str}")
+
+    if not agent_rows:
+        console.print("\n[dim]No agents observed yet. Connect one:[/dim]")
+        console.print("  · Claude Code: [green]anzen install-hook[/green] (with the collector running)")
+        console.print("  · OpenInference agents: set "
+                      "[green]OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318[/green]")
+        return
+
+    table = Table(title="Agents")
+    table.add_column("Agent", style="cyan")
+    table.add_column("Sessions", justify="right")
+    table.add_column("Actions", justify="right")
+    table.add_column("Last seen")
+    table.add_column("Findings")
+    for a in agent_rows:
+        table.add_row(
+            a["agent_name"], str(a["sessions"]), str(a["actions"]),
+            _ago(a["last_seen"]), _findings_cells(a["finding_counts"]),
+        )
+    console.print(table)
 
 
 _HOOK_MARKER = "anzen.claude_code_hook"
