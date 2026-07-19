@@ -8,15 +8,32 @@ import urllib.request
 import pytest
 
 from anzen.collector import make_server
+from anzen.rules import load_rules
 from anzen.store import ActionType, Store
+
+
+def _serve(store, **kwargs):
+    srv = make_server(store, host="127.0.0.1", port=0, **kwargs)  # ephemeral port
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    return srv
 
 
 @pytest.fixture()
 def server(tmp_path):
     store = Store(str(tmp_path / "anzen.db"))
-    srv = make_server(store, host="127.0.0.1", port=0)  # ephemeral port
-    thread = threading.Thread(target=srv.serve_forever, daemon=True)
-    thread.start()
+    srv = _serve(store)
+    yield store, f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+    srv.server_close()
+    store.close()
+
+
+@pytest.fixture()
+def scanning_server(tmp_path):
+    """A collector built with the rule pack — the `anzen serve`/`anzen up` configuration."""
+    store = Store(str(tmp_path / "anzen.db"))
+    srv = _serve(store, rules=load_rules())
     yield store, f"http://127.0.0.1:{srv.server_address[1]}"
     srv.shutdown()
     srv.server_close()
@@ -148,3 +165,67 @@ def test_duplicate_span_delivery_is_idempotent(server):
     session = store.get_session("sess-dup")
     assert session.action_count == 1        # span stored once
     assert session.input_tokens == 50       # tokens not double-counted
+
+
+def _risky_payload(session_id: str, command: str = "rm -rf /tmp/x") -> bytes:
+    return json.dumps({
+        "resourceSpans": [{
+            "resource": {"attributes": [
+                {"key": "service.name", "value": {"stringValue": "risky-agent"}},
+                {"key": "session.id", "value": {"stringValue": session_id}},
+            ]},
+            "scopeSpans": [{"spans": [{
+                "name": "run_bash",
+                "spanId": "aa11223344556677",
+                "traceId": "aa112233445566778899aabbccddeeff",
+                "startTimeUnixNano": "1700000000000000000",
+                "attributes": [
+                    {"key": "openinference.span.kind", "value": {"stringValue": "TOOL"}},
+                    {"key": "tool.name", "value": {"stringValue": "run_bash"}},
+                    {"key": "tool.parameters", "value": {"stringValue": json.dumps({"command": command})}},
+                ],
+            }]}],
+        }]
+    }).encode()
+
+
+def test_auto_scan_on_ingest(scanning_server):
+    """Findings exist the moment the action arrives — no manual `anzen scan`."""
+    store, base = scanning_server
+    _post(f"{base}/v1/traces", _risky_payload("sess-auto"), "application/json")
+
+    findings = store.get_findings("sess-auto")
+    assert any(f.rule_id == "DST-001" for f in findings)
+    assert findings[0].action_id is not None  # linked to the stored action
+
+
+def test_auto_scan_duplicate_delivery_no_duplicate_findings(scanning_server):
+    store, base = scanning_server
+    body = _risky_payload("sess-auto-dup")
+    _post(f"{base}/v1/traces", body, "application/json")
+    _post(f"{base}/v1/traces", body, "application/json")  # re-delivery
+
+    findings = [f for f in store.get_findings("sess-auto-dup") if f.rule_id == "DST-001"]
+    assert len(findings) == 1
+
+
+def test_manual_rescan_after_auto_scan_no_duplicates(scanning_server):
+    from anzen.rules import scan_session
+
+    store, base = scanning_server
+    _post(f"{base}/v1/traces", _risky_payload("sess-rescan"), "application/json")
+    auto = store.get_findings("sess-rescan")
+    scan_session(store, "sess-rescan", load_rules())  # manual `anzen scan`
+    assert len(store.get_findings("sess-rescan")) == len(auto)
+
+
+def test_agents_rollup(scanning_server):
+    store, base = scanning_server
+    _post(f"{base}/v1/traces", _risky_payload("sess-agents"), "application/json")
+
+    agents = store.list_agents()
+    assert len(agents) == 1
+    a = agents[0]
+    assert a["agent_name"] == "risky-agent"
+    assert a["sessions"] == 1 and a["actions"] == 1
+    assert a["finding_counts"].get("high") or a["finding_counts"].get("critical")

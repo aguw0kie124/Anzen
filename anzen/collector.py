@@ -7,8 +7,10 @@ LlamaIndex, CrewAI, the OpenAI/Anthropic SDK instrumentations) actually emit
 — into anzen Actions. Anything unrecognized is preserved as an `unknown`
 action with its full raw attributes; nothing is dropped.
 
-Ingestion is deliberately just: receive → normalize → store. Compliance
-scanning is a separate, manual step (`anzen scan`).
+Ingestion is: receive → normalize → store — and, when the server is built
+with a rule pack, each newly stored action is immediately matched against the
+deterministic rules so findings appear the moment activity arrives. The LLM
+pass stays manual (`anzen scan --llm`).
 """
 
 from __future__ import annotations
@@ -150,8 +152,16 @@ def normalize_span(
     return session, action
 
 
-def ingest_payload(store: Store, payload: dict[str, Any]) -> set[str]:
-    """Normalize and persist one ExportTraceServiceRequest dict. Returns touched session ids."""
+def ingest_payload(
+    store: Store, payload: dict[str, Any], rules: list | None = None
+) -> set[str]:
+    """Normalize and persist one ExportTraceServiceRequest dict. Returns touched session ids.
+
+    With `rules`, every newly inserted action is scanned immediately
+    (regex-only, synchronous) so findings track ingestion in real time.
+    """
+    from .rules import match_action
+
     touched: set[str] = set()
     for resource_spans in payload.get("resourceSpans", []):
         resource_attrs = _attrs_to_dict(
@@ -166,9 +176,13 @@ def ingest_payload(store: Store, payload: dict[str, Any]) -> set[str]:
                 session.input_tokens = session.output_tokens = 0
                 store.upsert_session(session)
                 inserted = store.insert_action(action)
-                if inserted is not None and token_delta != (0, 0):
-                    session.input_tokens, session.output_tokens = token_delta
-                    store.upsert_session(session)
+                if inserted is not None:
+                    if token_delta != (0, 0):
+                        session.input_tokens, session.output_tokens = token_delta
+                        store.upsert_session(session)
+                    if rules:
+                        action.id = inserted
+                        store.add_findings(match_action(action, rules))
                 touched.add(session.id)
     return touched
 
@@ -183,9 +197,10 @@ def decode_body(body: bytes, content_type: str) -> dict[str, Any]:
 
 
 class _CollectorHandler(BaseHTTPRequestHandler):
-    """One POST endpoint (/v1/traces) + a health check. Injected: `store`."""
+    """One POST endpoint (/v1/traces) + a health check. Injected: `store`, `rules`."""
 
     store: Store  # set by make_server
+    rules: list | None = None
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib naming
         if self.path != "/v1/traces":
@@ -195,7 +210,7 @@ class _CollectorHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length)
             payload = decode_body(body, self.headers.get("Content-Type", ""))
-            ingest_payload(self.store, payload)
+            ingest_payload(self.store, payload, self.rules)
         except Exception as exc:  # malformed payloads must not kill the server
             self.send_error(400, explain=str(exc))
             return
@@ -222,7 +237,17 @@ class _CollectorHandler(BaseHTTPRequestHandler):
         pass  # keep the console quiet; the CLI prints what matters
 
 
-def make_server(store: Store, host: str = "127.0.0.1", port: int = 4318) -> ThreadingHTTPServer:
-    """Build the collector server (call `.serve_forever()` to run it)."""
-    handler = type("CollectorHandler", (_CollectorHandler,), {"store": store})
+def make_server(
+    store: Store,
+    host: str = "127.0.0.1",
+    port: int = 4318,
+    rules: list | None = None,
+) -> ThreadingHTTPServer:
+    """Build the collector server (call `.serve_forever()` to run it).
+
+    Pass `rules` (see `anzen.rules.load_rules`) to auto-scan actions on ingest.
+    """
+    handler = type(
+        "CollectorHandler", (_CollectorHandler,), {"store": store, "rules": rules}
+    )
     return ThreadingHTTPServer((host, port), handler)
