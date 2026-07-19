@@ -1,4 +1,4 @@
-# Anzen 安全
+# Anzen 
 
 A simple observation and audit tool for AI agents. Point any
 **OpenInference-instrumented** agent (LangChain, LlamaIndex, CrewAI, or the
