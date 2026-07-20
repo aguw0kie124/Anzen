@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Flight recorder and compliance auditor for AI agents — logs every agent action via OpenTelemetry and flags risky or non-compliant behavior."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-or-later" }
 dependencies = [
     "typer>=0.12",
     "rich>=13.7",

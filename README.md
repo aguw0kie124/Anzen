@@ -90,3 +90,23 @@ secrets, destructive commands, exfiltration, PII, prompt injection — mapped
 to the OWASP LLM Top 10. Every finding explains what happened and how to fix
 it. See `anzen/rules_builtin.yaml` for the rule format, or point
 `anzen report --rules <dir>` at your own.
+
+## License
+
+Anzen is licensed under the **GNU AGPL-3.0-or-later** — see [LICENSE](LICENSE).
+
+You can run Anzen internally, self-hosted, at any scale, for free and forever.
+The copyleft only applies if you modify Anzen and offer it to others as a
+service; in that case you must publish your changes.
+
+The ingest path, detection engine, and rule format are open and will stay
+open — you should be able to audit the tool that watches your engineers. If
+you need to embed Anzen in a proprietary product or redistribute it without
+AGPL obligations, a commercial license is available; open an issue to start
+that conversation.
+
+## Contributing
+
+Contributions are welcome. Because Anzen is dual-licensed, contributors are
+asked to sign a Contributor License Agreement before their first PR is merged
+— this lets the project offer commercial licenses alongside the AGPL release.
