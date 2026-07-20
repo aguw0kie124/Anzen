@@ -3,13 +3,10 @@
 Discovery, observability, and security for fleets of AI coding agents.
 
 Anzen is a self-hosted server that ingests **Claude Code's native
-OpenTelemetry export** — tool calls, permission decisions, prompts, MCP server
-connections, plugin inventory, and cost — scans every action against a
-compliance rule pack (OWASP LLM Top 10 mapped), and gives security teams an
+OpenTelemetry export** containing tool calls, permission decisions, prompts, MCP server
+connections, plugin inventory, and cost and then scans every action against a
+compliance rule pack (OWASP LLM Top 10), giving security teams an
 inventory of what's actually running.
-
-**Nothing is installed on developer machines.** Claude Code already emits this
-telemetry; an admin points it at Anzen with a managed-settings block.
 
 ## Setup
 
@@ -93,11 +90,3 @@ secrets, destructive commands, exfiltration, PII, prompt injection — mapped
 to the OWASP LLM Top 10. Every finding explains what happened and how to fix
 it. See `anzen/rules_builtin.yaml` for the rule format, or point
 `anzen report --rules <dir>` at your own.
-
-## Roadmap
-
-Next: a web dashboard (Inventory · Fleet · Sessions · Findings) replacing the
-terminal commands, Docker packaging, and permission-decision rules (e.g.
-destructive commands that were auto-approved). Later: real-time blocking via a
-`PreToolUse` guard, and support for other agents' OTel dialects
-(OpenInference/`gen_ai`) if needed.
