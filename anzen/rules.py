@@ -1,3 +1,6 @@
+# Copyright 2026 Siddharth
+# SPDX-License-Identifier: Apache-2.0
+
 """Rule loading, matching, and session scanning.
 
 Rules are YAML documents validated against the `Rule` schema — `explanation`

@@ -1,3 +1,6 @@
+# Copyright 2026 Siddharth
+# SPDX-License-Identifier: Apache-2.0
+
 """The Anzen server: OTLP ingest + rule scanning + read API.
 
 Ingest speaks OTLP/HTTP in both encodings:

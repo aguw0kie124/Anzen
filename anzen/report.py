@@ -1,3 +1,6 @@
+# Copyright 2026 Siddharth
+# SPDX-License-Identifier: Apache-2.0
+
 """Markdown audit report rendering."""
 
 from __future__ import annotations

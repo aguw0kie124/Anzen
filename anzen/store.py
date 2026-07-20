@@ -1,3 +1,6 @@
+# Copyright 2026 Siddharth
+# SPDX-License-Identifier: Apache-2.0
+
 """SQLite persistence and shared data models.
 
 Three tables: sessions, actions, findings. Every action keeps the full raw

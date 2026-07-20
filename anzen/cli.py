@@ -1,3 +1,6 @@
+# Copyright 2026 Siddharth
+# SPDX-License-Identifier: Apache-2.0
+
 """Anzen command-line interface."""
 
 from __future__ import annotations

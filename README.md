@@ -30,8 +30,8 @@ ANZEN_API_KEYS=your-secret-key anzen server --host 0.0.0.0
     "OTEL_LOG_TOOL_DETAILS": "1" } }
 ```
 
-Managed settings take precedence over user settings — engineers cannot
-disable reporting. See the
+These can be set per-developer in `~/.claude/settings.json`, or rolled out
+centrally via managed settings if your organization prefers. See the
 [Claude Code monitoring docs](https://code.claude.com/docs/en/monitoring-usage).
 
 ### Privacy tiers
@@ -93,20 +93,16 @@ it. See `anzen/rules_builtin.yaml` for the rule format, or point
 
 ## License
 
-Anzen is licensed under the **GNU AGPL-3.0-or-later** — see [LICENSE](LICENSE).
+Anzen is licensed under the **Apache License 2.0** — see [LICENSE](LICENSE).
 
-You can run Anzen internally, self-hosted, at any scale, for free and forever.
-The copyleft only applies if you modify Anzen and offer it to others as a
-service; in that case you must publish your changes.
+Run it internally, modify it, embed it in a commercial product, redistribute
+it. No copyleft obligations and no separate commercial license needed.
 
 The ingest path, detection engine, and rule format are open and will stay
-open — you should be able to audit the tool that watches your engineers. If
-you need to embed Anzen in a proprietary product or redistribute it without
-AGPL obligations, a commercial license is available; open an issue to start
-that conversation.
+open — you should be able to read the source of a tool that sees your
+developers' activity.
 
 ## Contributing
 
-Contributions are welcome. Because Anzen is dual-licensed, contributors are
-asked to sign a Contributor License Agreement before their first PR is merged
-— this lets the project offer commercial licenses alongside the AGPL release.
+Contributions are welcome. Contributions are accepted under the Apache
+License 2.0, per section 5 of the license.

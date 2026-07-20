@@ -1,3 +1,6 @@
+# Copyright 2026 Siddharth
+# SPDX-License-Identifier: Apache-2.0
+
 """Claude Code native telemetry → Anzen records.
 
 Claude Code (and Cowork) export their activity as OpenTelemetry **log

@@ -1,3 +1,6 @@
+# Copyright 2026 Siddharth
+# SPDX-License-Identifier: Apache-2.0
+
 """Optional Claude-powered contextual analysis pass.
 
 Deterministic rules catch known patterns in a single action. This pass sends
