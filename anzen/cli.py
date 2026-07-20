@@ -72,29 +72,30 @@ def _main(
 
 
 @app.command()
-def serve(
+def server(
     port: int = typer.Option(DEFAULT_PORT, help="OTLP/HTTP port to listen on."),
-    host: str = typer.Option(DEFAULT_HOST, help="Host to bind."),
+    host: str = typer.Option(DEFAULT_HOST, help="Host to bind (0.0.0.0 in Docker)."),
     db: str = _DB_OPTION,
 ) -> None:
-    """Start the collector: receive and record agent telemetry (OpenInference over OTLP)."""
-    from .collector import make_server
+    """Run the Anzen server: OTLP ingest (Claude Code native telemetry), rule scan, read API."""
+    import os
+
+    import uvicorn
+
     from .rules import load_rules
+    from .server.app import create_app
 
     db = _db(db)
     store = Store(db)
     rules = load_rules()
-    server = make_server(store, host=host, port=port, rules=rules)
-    console.print(f"[bold]anzen[/bold] collector · db=[cyan]{db}[/cyan] · "
-                  f"auto-scan: [green]{len(rules)} rules[/green]")
-    console.print(f"listening on [green]http://{host}:{port}/v1/traces[/green]")
-    console.print("[dim]inspect with: anzen list · anzen show <session>[/dim]")
+    api_keys = {k.strip() for k in os.environ.get("ANZEN_API_KEYS", "").split(",") if k.strip()}
+    console.print(f"[bold]anzen[/bold] server · db=[cyan]{db}[/cyan] · "
+                  f"auto-scan: [green]{len(rules)} rules[/green] · "
+                  + ("auth: [green]on[/green]" if api_keys else "auth: [yellow]off (set ANZEN_API_KEYS)[/yellow]"))
+    console.print(f"ingest: [green]http://{host}:{port}/v1/logs[/green]")
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        uvicorn.run(create_app(store, rules, api_keys), host=host, port=port, log_level="warning")
     finally:
-        server.server_close()
         store.close()
 
 
@@ -105,7 +106,7 @@ def list_sessions(db: str = _DB_OPTION) -> None:
     store = Store(db)
     sessions = store.list_sessions()
     if not sessions:
-        console.print("[dim]No sessions recorded yet. Run `anzen serve` and point an agent at it.[/dim]")
+        console.print("[dim]No sessions recorded yet. Run `anzen server` and point an agent at it.[/dim]")
         return
 
     table = Table(title="Agent sessions")
@@ -209,7 +210,7 @@ def report(
     store.close()
 
 
-def _collector_healthy(host: str, port: int, timeout: float = 1.0) -> bool:
+def _server_healthy(host: str, port: int, timeout: float = 1.0) -> bool:
     import urllib.request
 
     try:
@@ -225,14 +226,14 @@ def status(
     port: int = typer.Option(DEFAULT_PORT, help="Collector port to health-check."),
     host: str = typer.Option(DEFAULT_HOST, help="Collector host to health-check."),
 ) -> None:
-    """One glance: collector health, agents seen, findings."""
+    """One glance: server health, agents seen, findings."""
     db = _db(db)
-    if _collector_healthy(host, port):
-        console.print(f"[green]●[/green] collector [green]running[/green] — "
+    if _server_healthy(host, port):
+        console.print(f"[green]●[/green] server [green]running[/green] — "
                       f"http://{host}:{port}/v1/traces")
     else:
-        console.print("[red]●[/red] collector [red]not running[/red] — "
-                      "start with: [green]anzen serve[/green]")
+        console.print("[red]●[/red] server [red]not running[/red] — "
+                      "start with: [green]anzen server[/green]")
 
     db_path = Path(db)
     size = f"{db_path.stat().st_size / 1024:.0f} KB" if db_path.exists() else "not created yet"
@@ -247,7 +248,7 @@ def status(
     console.print(f"  findings: {_findings_cells(stats['findings'])}")
 
     if not agent_rows:
-        console.print("\n[dim]No agents observed yet. Point an agent's OTel exporter at the collector:[/dim]")
+        console.print("\n[dim]No agents observed yet. Point an agent's OTel exporter at the server:[/dim]")
         console.print("  [green]OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318[/green]")
         return
 

@@ -373,6 +373,20 @@ class Store:
             )
             return cur.lastrowid if cur.rowcount else None
 
+    def apply_decision(
+        self, session_id: str, tool_use_id: str, decision: str, source: str
+    ) -> bool:
+        """Merge a tool_decision event onto its tool action. Returns False if no match yet."""
+        if not tool_use_id:
+            return False
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE actions SET decision = ?, decision_source = ? "
+                "WHERE session_id = ? AND tool_use_id = ?",
+                (decision, source, session_id, tool_use_id),
+            )
+            return cur.rowcount > 0
+
     def get_actions(self, session_id: str) -> list[Action]:
         rows = self._conn.execute(
             "SELECT * FROM actions WHERE session_id = ? ORDER BY timestamp, id",

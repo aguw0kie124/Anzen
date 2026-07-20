@@ -1,61 +1,90 @@
 # Anzen
 
-An observation and audit layer for AI agents. Anzen ingests **OpenTelemetry**
-telemetry from agents into a local SQLite log and scans every action as it
-arrives against a compliance rule pack (OWASP LLM Top 10 mapped), so findings
-are always current.
+Discovery, observability, and security for fleets of AI coding agents.
 
-Agents don't need custom instrumentation — anything that emits OTel spans with
-**OpenInference** attributes (LangChain, LlamaIndex, CrewAI, the
-OpenAI/Anthropic SDK instrumentations) works with one environment variable.
-Native ingestion of Claude Code's built-in telemetry (OTLP logs/metrics) is in
-progress — see the roadmap note below.
+Anzen is a self-hosted server that ingests **Claude Code's native
+OpenTelemetry export** — tool calls, permission decisions, prompts, MCP server
+connections, plugin inventory, and cost — scans every action against a
+compliance rule pack (OWASP LLM Top 10 mapped), and gives security teams an
+inventory of what's actually running.
 
-## How it works
+**Nothing is installed on developer machines.** Claude Code already emits this
+telemetry; an admin points it at Anzen with a managed-settings block.
 
-1. **The collector** (`anzen serve`) — an OTLP/HTTP endpoint that receives
-   activity, stores it, and scans it against the rule pack.
-2. **Your agent's OTel exporter** — pointed at the collector:
+## Setup
 
-```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-```
-
-Everything is stored locally in `~/.anzen/anzen.db`. Nothing leaves your
-machine. Override the location with `ANZEN_HOME`.
-
-## Install
+**1. Run the server**
 
 ```bash
 pip install -e ".[dev]"
+ANZEN_API_KEYS=your-secret-key anzen server --host 0.0.0.0
 ```
 
-## Quick start
+**2. Point Claude Code at it** — in managed settings (MDM) or
+`~/.claude/settings.json`:
 
-```bash
-# 1. Start the collector — leave this running in its own terminal
-anzen serve
-
-# 2. Point any OpenInference/OTel-instrumented agent at it
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-
-# (or run the bundled real-agent example: python examples/real_agent.py)
-
-# 3. See what was captured
-anzen status
-anzen list
-anzen show <id>
+```json
+{ "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://anzen.internal:4318",
+    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer your-secret-key",
+    "OTEL_LOG_TOOL_DETAILS": "1" } }
 ```
+
+Managed settings take precedence over user settings — engineers cannot
+disable reporting. See the
+[Claude Code monitoring docs](https://code.claude.com/docs/en/monitoring-usage).
+
+### Privacy tiers
+
+Claude Code redacts content by default. Choose how much Anzen sees:
+
+| Setting | What Anzen receives |
+|---|---|
+| *(default)* | Metadata only — tool names, decisions, timings, cost, identity |
+| `OTEL_LOG_TOOL_DETAILS=1` | Tool parameters and inputs, bash commands, MCP server names |
+| `OTEL_LOG_USER_PROMPTS=1` | Prompt and response text |
+
+Most rules need `OTEL_LOG_TOOL_DETAILS=1` to match on command content.
+
+## API
+
+| Route | What it does |
+|---|---|
+| `POST /v1/logs` | OTLP ingest (protobuf + JSON). Rules run on arrival. |
+| `POST /v1/metrics` | Accepted for exporter compatibility. |
+| `GET /api/inventory` | Discovered MCP servers, plugins, skills, hooks. |
+| `PATCH /api/inventory/{id}` | Mark an item approved / unreviewed. |
+| `GET /api/endpoints` | Who is running agents, where, on what version. |
+| `GET /api/sessions` · `/api/sessions/{id}` | Sessions and full action timelines. |
+| `GET /api/findings?severity=&since=` | Cross-session findings feed. |
+| `GET /api/sessions/{id}/report.md` | Markdown audit report. |
+| `GET /healthz` | Liveness (never requires auth). |
+
+All other routes require `Authorization: Bearer <key>` when `ANZEN_API_KEYS`
+is set. Unset = open, for local development only.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `anzen serve` | Run the collector. Must stay running to capture anything. |
-| `anzen status` | One glance: collector health, agents seen, findings. |
+| `anzen server [--host --port]` | Run the server (OTLP ingest + read API). |
+| `anzen status` | One glance: server health, agents seen, findings. |
 | `anzen list` | List recorded sessions. |
 | `anzen show <id>` | Full action timeline for one session. |
 | `anzen report <id> [-o file] [--llm] [--rules dir]` | Audit report; `--llm` adds a Claude review pass, `--rules` re-scans with an extra rule pack. |
+
+## Known gaps
+
+- **Tool *output* content is not available** on the events path — Claude Code
+  sends result sizes, not bodies. Rules matching on output (e.g. `INJ-001`
+  prompt-injection detection) have reduced coverage.
+- **Subprocess activity is invisible** — `OTEL_*` is not propagated to shells
+  or MCP servers Claude Code spawns.
+- Rule precision needs work (e.g. `SEC-002` matches `.env.example`), and
+  matched secrets are currently stored unredacted.
 
 ## How auditing works
 
@@ -67,9 +96,8 @@ it. See `anzen/rules_builtin.yaml` for the rule format, or point
 
 ## Roadmap
 
-Anzen is pivoting from a single-developer CLI to a self-hosted
-discovery/observability/security server for fleets of coding agents,
-ingesting Claude Code's **native** OpenTelemetry export (tool calls,
-permission decisions, MCP server connections, plugin inventory, cost) with a
-web dashboard — no per-machine install. The custom Claude Code hook that
-previously lived here has been removed in favor of that native telemetry.
+Next: a web dashboard (Inventory · Fleet · Sessions · Findings) replacing the
+terminal commands, Docker packaging, and permission-decision rules (e.g.
+destructive commands that were auto-approved). Later: real-time blocking via a
+`PreToolUse` guard, and support for other agents' OTel dialects
+(OpenInference/`gen_ai`) if needed.
